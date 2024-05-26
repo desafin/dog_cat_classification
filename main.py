@@ -80,34 +80,38 @@ transforms_for_val_test = transforms.Compose([
 ])
 
 
-# class Dataset
 class CustomDataset(Dataset):
-    def __init__(self, file_list, transform=None):
+    def __init__(self, file_list, transform=None, is_test=False):
         self.file_list = file_list
         self.transform = transform
+        self.is_test = is_test
 
     def __len__(self):
         return len(self.file_list)
 
     def __getitem__(self, idx):
         img_path = self.file_list[idx]
-        img = Image.open(img_path).convert('RGB')  # Ensure the image is in RGB format
+        img = Image.open(img_path).convert('RGB')
         if self.transform is not None:
             img_transform = self.transform(img)
+
+        if self.is_test:
+            return img_transform, os.path.basename(img_path)
+
         label = os.path.basename(img_path).split('.')[0]
         if label == 'dog':
             label = 1
         elif label == 'cat':
             label = 0
         else:
-            raise ValueError(f'Unknown label {label_str} in file {img_path}')
+            raise ValueError(f'Unknown label in file {img_path}')
 
         return img_transform, label
 
 
 dataset_train = CustomDataset(train_list, transform=transforms_for_train)
 dataset_valid = CustomDataset(val_list, transform=transforms_for_val_test)
-dataset_test = CustomDataset(test_list, transform=transforms_for_val_test)
+dataset_test = CustomDataset(test_list, transform=transforms_for_val_test, is_test=True)
 
 from torch.utils.data import DataLoader  # 데이터 로더 클래스
 
@@ -221,7 +225,7 @@ def train_model(model, criterion, optimizer, early_stop, epochs, train_loader, v
     model.load_state_dict(best_model)
     return model, lowest_loss, train_losses, valid_losses, train_accuracies, valid_accuracies
 
-model, lowest_loss, train_losses, valid_losses, train_accuracies, valid_accuracies = train_model(model, loss_func, optimizer, 0, 10, train_batches, val_batches)
+model, lowest_loss, train_losses, valid_losses, train_accuracies, valid_accuracies = train_model(model, loss_func, optimizer, 0, 1, train_batches, val_batches)
 
 PATH = './'
 torch.save(model.state_dict(), PATH + 'model_vit_base_patch32_224_in21k_linear_schedule_with_warmup_adam_1e5.pth')  # 모델 객체의 state_dict 저장
@@ -229,9 +233,11 @@ torch.save(model.state_dict(), PATH + 'model_vit_base_patch32_224_in21k_linear_s
 PATH = './'
 model.load_state_dict(torch.load(PATH + 'model_vit_base_patch32_224_in21k_linear_schedule_with_warmup_adam_1e5.pth'))
 
+# 테스트 데이터셋 로드
 test_list = glob.glob(os.path.join(test_dir, '*.jpg'))
-dataset_test = CustomDataset(test_list, transform=transforms_for_val_test)
+dataset_test = CustomDataset(test_list, transform=transforms_for_val_test, is_test=True)
 test_batches = DataLoader(dataset=dataset_test, batch_size=64, shuffle=False)
+
 
 
 def predict(model, data_loader):
@@ -260,13 +266,9 @@ print (pred.shape, len(ids))
 
 
 
-
-submission = pd.DataFrame({'id': ids, 'label': np.clip(pred, 0.006, 1-0.006).squeeze()})
-submission.sort_values(by='id', inplace=True)
-submission.reset_index(drop=True, inplace=True)
-submission.to_csv('submission.csv', index=False)
-
+# 캐글 제출 형식에 맞게 예측값 변환
 submission = pd.DataFrame({'id': ids, 'label': np.clip(pred, 0.007, 1-0.007).squeeze()})
+submission['id'] = submission['id'].str.split('.').str[0].astype(int)
 submission.sort_values(by='id', inplace=True)
 submission.reset_index(drop=True, inplace=True)
 submission.to_csv('submission.csv', index=False)
